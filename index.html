@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>サイバー攻防デュエル（ブラウザ版）</title>
+  <style>
+    :root{--card-bg:#ffffff;--bg:#f3f6fb;--accent:#2563eb;--danger:#ef4444;--good:#10b981}
+    html,body{height:100%;margin:0;font-family:system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,Arial;}
+    body{background:linear-gradient(180deg,#eef7ff 0%,var(--bg) 100%);display:flex;align-items:center;justify-content:center;padding:24px}
+    .card{width:100%;max-width:760px;background:var(--card-bg);border-radius:12px;box-shadow:0 8px 30px rgba(20,40,80,0.08);padding:20px}
+    .header{display:flex;gap:12px;align-items:center;justify-content:space-between}
+    .title{font-size:18px;font-weight:700;color:#0f172a}
+    .small{font-size:13px;color:#475569}
+    .status{display:flex;gap:12px;align-items:center}
+    .hp{background:#f1f5f9;padding:8px 12px;border-radius:10px;font-weight:600}
+    .controls{display:flex;gap:8px;align-items:center}
+    .btn{background:var(--accent);color:#fff;padding:8px 12px;border-radius:8px;border:0;cursor:pointer;font-weight:600}
+    .btn:disabled{opacity:0.5;cursor:default}
+    .btn-ghost{background:transparent;border:1px solid #e2e8f0;color:#0f172a}
+    .game{display:grid;grid-template-columns:1fr 340px;gap:18px;margin-top:18px}
+    @media (max-width:900px){.game{grid-template-columns:1fr;}}
+    .panel{background:#fbfdff;border-radius:10px;padding:14px}
+    .question{font-size:16px;font-weight:700;margin-bottom:12px}
+    .choices{display:flex;flex-direction:column;gap:8px}
+    .choice{padding:10px;border-radius:8px;border:1px solid #e6eefb;background:transparent;text-align:left;cursor:pointer}
+    .choice:disabled{opacity:0.6;cursor:default}
+    .log{max-height:380px;overflow:auto;padding:8px;display:flex;flex-direction:column-reverse;gap:8px}
+    .log-entry{font-size:13px;padding:8px;border-radius:8px;background:#f8fafc;border:1px solid #e6eefb}
+    .result{margin-top:12px;font-size:16px;font-weight:700}
+    .explain{margin-top:6px;font-size:13px;color:#334155}
+    .name-input{padding:8px;border-radius:8px;border:1px solid #e2e8f0}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <div>
+        <div class="title">⚔️ サイバー攻防デュエル（ブラウザ版）</div>
+        <div class="small">学習しながら敵を倒すクイズゲーム。テーマ学習→復習モードあり。</div>
+      </div>
+      <div class="status">
+        <div>
+          <label class="small">プレイヤー名</label><br>
+          <input id="playerName" class="name-input" type="text" placeholder="あなたの名前" value="あなた" />
+        </div>
+        <div class="hp" id="hpStatus">あなたのHP: 20 &nbsp;&nbsp; 敵のHP: 20</div>
+        <div class="controls">
+          <button id="restartBtn" class="btn-ghost">リスタート</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="game">
+      <div>
+        <div class="panel">
+          <div class="question" id="questionText">読み込み中…</div>
+
+          <div class="choices" id="choices"></div>
+
+          <div class="explain" id="explainText"></div>
+          <div class="result" id="resultText"></div>
+        </div>
+      </div>
+
+      <aside>
+        <div class="panel">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div class="small">ログ（最新が上）</div>
+            <div class="small" id="modeLabel">Mode: theme</div>
+          </div>
+          <div class="log" id="logArea"></div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    // 元のPythonデータをベースにした問題リスト
+    const QUIZ_DATA = [
+      {q: "強力なパスワードの条件は？", ans: "英数字と記号を混ぜる", choices: ["誕生日を使う", "英数字と記号を混ぜる", "全部同じ文字","パスワードを統一する"], explain: "強力なパスワードは英数字や記号を組み合わせると推測されにくくなる。", theme: "パスワード"},
+      {q: "不正メールで情報を盗む攻撃は？", ans: "フィッシング", choices: ["マルウェア", "フィッシング", "SQLインジェクション","ワンクリック"], explain: "フィッシングは偽メールやサイトで情報を入力させて盗む攻撃です。", theme: "攻撃手法"},
+      {q: "通信を安全にする仕組みは？", ans: "暗号化", choices: ["圧縮", "暗号化", "コピー","共有"], explain: "暗号化により第三者に内容を読まれないように保護できます。", theme: "暗号化"},
+      {q: "Wi-Fiを安全に使うための対策は？", ans: "パスワード付き暗号化", choices: ["公開Wi-Fiを使う", "パスワードなし", "パスワード付き暗号化", "SSID非表示のみ"], explain: "Wi-Fiは必ずWPA2/WPA3など暗号化されたものを使いましょう。", theme: "ネットワーク"},
+      {q: "不正アクセスを防ぐソフトは？", ans: "ファイアウォール", choices: ["アンチウイルスだけ", "パスワード管理", "ファイアウォール", "VPNだけ"], explain: "ファイアウォールは外部からの不正アクセスを防ぎます。", theme: "防御"},
+      {q: "怪しいメールに添付されているのは？", ans: "マルウェア", choices: ["マルウェア", "PDF", "画像", "動画"], explain: "不正メールにはマルウェアやウイルスが含まれることがあります。", theme: "攻撃手法"},
+      {q: "パスワードの使い回しは安全か？", ans: "安全ではない", choices: ["安全ではない", "安全", "場合による","パスワードなしでいい"], explain: "同じパスワードを使い回すと、1つ漏れるだけで他のサービスも危険になります。", theme: "パスワード"},
+      {q: "安全なブラウザの目印は？", ans: "HTTPS", choices: ["HTTP", "HTTPS", "FTP","CSS"], explain: "HTTPSは通信が暗号化されており安全性が高い。", theme: "暗号化"}
+    ];
+
+    // ゲーム状態
+    let playerHp = 20, enemyHp = 20;
+    let remainingQuestions = [...QUIZ_DATA];
+    let mode = 'theme'; // 'theme' -> 'review'
+    let currentQ = null;
+    const playerNameInput = document.getElementById('playerName');
+
+    // UI要素
+    const hpStatus = document.getElementById('hpStatus');
+    const questionText = document.getElementById('questionText');
+    const choicesBox = document.getElementById('choices');
+    const explainText = document.getElementById('explainText');
+    const resultText = document.getElementById('resultText');
+    const logArea = document.getElementById('logArea');
+    const modeLabel = document.getElementById('modeLabel');
+    const restartBtn = document.getElementById('restartBtn');
+
+    restartBtn.addEventListener('click', () => {
+      startNewGame();
+    });
+
+    function startNewGame(){
+      playerHp = 20; enemyHp = 20;
+      remainingQuestions = [...QUIZ_DATA];
+      mode = 'theme';
+      currentQ = null;
+      explainText.textContent = '';
+      resultText.textContent = '';
+      modeLabel.textContent = 'Mode: ' + mode;
+      renderStatus();
+      logArea.innerHTML = '';
+      pushLog('ゲームを開始しました。');
+      showQuestion();
+    }
+
+    function renderStatus(){
+      const name = playerNameInput.value.trim() || 'あなた';
+      hpStatus.textContent = `${name}のHP: ${playerHp}   敵のHP: ${enemyHp}`;
+    }
+
+    function pushLog(text){
+      const div = document.createElement('div');
+      div.className = 'log-entry';
+      div.textContent = text;
+      logArea.appendChild(div);
+    }
+
+    function showQuestion(){
+      explainText.textContent = '';
+      resultText.textContent = '';
+
+      if (remainingQuestions.length === 0){
+        if (mode === 'theme'){
+          remainingQuestions = [...QUIZ_DATA];
+          mode = 'review';
+          modeLabel.textContent = 'Mode: ' + mode;
+          pushLog('✨ 復習モード開始！ランダムに問題が出ます。');
+        } else {
+          resultText.textContent = '🎉 全問題クリア！知識を身につけました！';
+          choicesBox.innerHTML = '';
+          return;
+        }
+      }
+
+      // ランダムに1問取得
+      const idx = Math.floor(Math.random() * remainingQuestions.length);
+      currentQ = remainingQuestions.splice(idx,1)[0];
+
+      questionText.textContent = '💡 問題: ' + currentQ.q;
+
+      // 選択肢表示（元の順序を使用）
+      choicesBox.innerHTML = '';
+      for (let i=0;i<4;i++){
+        const btn = document.createElement('button');
+        btn.className = 'choice';
+        btn.textContent = currentQ.choices[i] || '';
+        if (!currentQ.choices[i]) btn.disabled = true;
+        btn.addEventListener('click', () => onChoose(btn));
+        choicesBox.appendChild(btn);
+      }
+    }
+
+    function onChoose(btn){
+      const selected = btn.textContent;
+      // disable all choices until next question
+      const all = choicesBox.querySelectorAll('button');
+      all.forEach(b => b.disabled = true);
+
+      if (selected === currentQ.ans){
+        const dmg = randInt(3,5);
+        enemyHp -= dmg;
+        pushLog(`✅ 正解！敵に${dmg}ダメージ！（${currentQ.theme}）`);
+        explainText.textContent = '解説: ' + currentQ.explain;
+      } else {
+        const dmg = randInt(2,4);
+        playerHp -= dmg;
+        pushLog(`❌ 不正解！あなたは${dmg}ダメージを受けた。正解は「${currentQ.ans}」。（${currentQ.theme}）`);
+        explainText.textContent = '解説: ' + currentQ.explain;
+      }
+
+      renderStatus();
+      checkGameOver();
+
+      if (playerHp > 0 && enemyHp > 0){
+        // 次の問題を少し待って出す
+        setTimeout(() => {
+          showQuestion();
+        }, 1500);
+      }
+    }
+
+    function checkGameOver(){
+      if (playerHp <= 0){
+        resultText.textContent = '❌ 敗北…システムを突破されました。';
+        disableChoices();
+        pushLog('ゲームオーバー：敗北');
+      } else if (enemyHp <= 0){
+        resultText.textContent = '✅ 勝利！システムを守り切りました！';
+        disableChoices();
+        pushLog('ゲームオーバー：勝利');
+      }
+    }
+
+    function disableChoices(){
+      const all = choicesBox.querySelectorAll('button');
+      all.forEach(b => b.disabled = true);
+    }
+
+    function randInt(a,b){ // inclusive
+      return Math.floor(Math.random()*(b-a+1))+a;
+    }
+
+    // 名前変更で表示を更新
+    playerNameInput.addEventListener('input', renderStatus);
+
+    // 最初に開始
+    startNewGame();
+
+  </script>
+</body>
+</html>
